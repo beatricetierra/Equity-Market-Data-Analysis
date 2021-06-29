@@ -12,60 +12,70 @@ def parse_csv(line:str):
     try:
         # [logic to parse records]
         if record[record_type_pos] == "Q":
-            event = common_event(record[0], None, record[2], record[3], record[4], record[5], \
-                                 record[6], record[7], record[8], record[9], record[10], None, None, "Q")
+            event = common_event(record[0], record[2], record[3], record[6], record[4], record[5], \
+                                  record[1], None, record[7], record[8], record[9], record[10], "Q")
             return event
         elif record[record_type_pos] == "T":
-            event = common_event(record[0], None, record[2], record[3], record[4], record[5], \
-                                 record[6], record[7], record[8], None, None, None, "T")
+            event = common_event(record[0], record[2], record[3], record[6], record[4], record[5], \
+                                  record[1], record[7], None, record[8], None, None, "T")
             return event
     except Exception as e:
         # [save record to dummy event in bad partition]
         # [fill in the fields as None or empty string]
         return common_event(None,None,None,None,None,None,None,None,None,None,None,None,"B")
 
-# def parse_json(line:str):
-#     record_type = record['event_type']
-#     try:
-#         # [logic to parse records]
-#         if record_type == "T":
-#             # [Get the applicable field values from json]
-#             if # [some key fields empty]:
-#                 event = common_event(col1_val, col2_val, ..., "T","")
-#             else:
-#                 event = ommon_event(,,,....,,,,,"B",line)
-#             return event
-#         elif record_type == "Q":
-#             # [Get the applicable field values from json]
-#             if # [some key fields empty]:
-#                 event = common_event(col1_val, col2_val, … , "Q","")
-#             else:
-#                 event = common_event(,,,....,,,,,"B",line)
-#             return event
-#     except Exception as e:
-#         # [save record to dummy event in bad partition]
-#         # [fill in the fields as None or empty string]
-#         return common_event(,,,....,,,,,"B",line)
+def parse_json(line:str):
+    record = json.loads(line)
+    record_type = record['event_type']
+    try:
+        # [logic to parse records]
+        if record_type == "T":
+            # [Get the applicable field values from json]
+            if 'execution_id' in record:
+                event = common_event(record['trade_dt'], record['event_type'], record['symbol'], record['exchange'], record['event_tm'], \
+                                    record['event_seq_nb'], record['file_tm'], record['price'], None, record['size'], None, None,"T")
+            else:
+                event = common_event(None,None,None,None,None,None,None,None,None,None,None,None,"B")
+            return event
+        elif record_type == "Q":
+            # [Get the applicable field values from json]
+            if 'event_seq_nb' in record:
+                event = common_event(record['trade_dt'], record['event_type'], record['symbol'], record['exchange'], record['event_tm'], \
+                                    record['event_seq_nb'], record['file_tm'], None, record['bid_pr'], record['bid_size'], record['ask_pr'], record['ask_size'],"Q")
+            else:
+                event = common_event(None,None,None,None,None,None,None,None,None,None,None,None,"B")
+            return event
+    except Exception as e:
+        # [save record to dummy event in bad partition]
+        # [fill in the fields as None or empty string]
+        return common_event(None,None,None,None,None,None,None,None,None,None,None,None,"B")
 
 spark = SparkSession.builder.master("local").appName("app").getOrCreate()
-spark.conf.set("fs.azure.account.key.equitymarketdatastorage.blob.core.windows.net","0Pjp/4C3REg7xPeNZulrdlcm85uSgj3mtonuvHyZcxNkDtvUyDmDqaum2rDj9qxucgJgHpLfDKCstiQ3UsMo8Q==")
-raw = spark.sparkContext.textFile("data/csv/2020-08-05/NYSE/part-00000-5e4ced0a-66e2-442a-b020-347d0df4df8f-c000.txt")
-parsed = raw.map(lambda line: parse_csv(line))
-data = spark.createDataFrame(parsed)
-#data.write.partitionBy("partition").mode("overwrite").parquet("output_dir")
+spark.conf.set("fs.azure.account.key.equitymarketdatastorage.blob.core.windows.net","DefaultEndpointsProtocol=https;AccountName=equitymarketdatastorage;AccountKey=0Pjp/4C3REg7xPeNZulrdlcm85uSgj3mtonuvHyZcxNkDtvUyDmDqaum2rDj9qxucgJgHpLfDKCstiQ3UsMo8Q==;EndpointSuffix=core.windows.net")
+schema = StructType([ \
+    StructField("trade_dt", StringType(), True), \
+    StructField("rec_type", StringType(),True), \
+    StructField("symbol", StringType(),True), \
+    StructField("exchange", StringType(), True), \
+    StructField("event_tm", StringType(), True), \
+    StructField("event_seq_nb", StringType(), True), \
+    StructField("arrival_tm", StringType(), True), \
+    StructField("trade_pr", StringType(),True), \
+    StructField("bid_pr", StringType(),True), \
+    StructField("bid_size", StringType(), True), \
+    StructField("ask_pr", StringType(), True), \
+    StructField("ask_size", StringType(), True), \
+    StructField("partition", StringType(), True) \
+  ])
 
-# schema = StructType([ \
-#     StructField("trade_dt", DateType(), True), \
-#     StructField("rec_type", StringType(),True), \
-#     StructField("symbol", StringType(),True), \
-#     StructField("exchange", StringType(), True), \
-#     StructField("event_tm", TimestampType(), True), \
-#     StructField("event_seq_nb", IntegerType(), True), \
-#     StructField("arrival_tm", TimestampType(), True), \
-#     StructField("trade_pr", DecimalType(),True), \
-#     StructField("bid_pr", DecimalType(),True), \
-#     StructField("bid_size", IntegerType(), True), \
-#     StructField("ask_pr", DecimalType(), True), \
-#     StructField("ask_size", IntegerType(), True), \
-#     StructField("partition", StringType(), True) \
-#   ])
+csv_raw = spark.sparkContext.textFile("wasbs://market-value@equitymarketdatastorage.blob.core.windows.net/data/csv/2020-08-05/NYSE/part-00000-5e4ced0a-66e2-442a-b020-347d0df4df8f-c000.txt")
+csv_parsed = csv_raw.map(lambda line: parse_csv(line))
+csv_data = spark.createDataFrame(csv_parsed, schema=schema)
+
+json_raw = spark.sparkContext.textFile("wasbs://market-value@equitymarketdatastorage.blob.core.windows.net/data/json/2020-08-05/NASDAQ/part-00000-c6c48831-3d45-4887-ba5f-82060885fc6c-c000.txt")
+json_parsed = json_raw.map(lambda line: parse_json(line))
+json_data = spark.createDataFrame(json_parsed, schema=schema)
+
+# Save output
+csv_data.write.partitionBy("partition").mode("overwrite").parquet("output_dir")
+json_data.write.partitionBy("partition").mode("overwrite").parquet("output_dir")
