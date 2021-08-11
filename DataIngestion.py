@@ -1,7 +1,17 @@
+from datetime import datetime
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DateType, TimestampType, DecimalType
 from pyspark.sql import SparkSession
 from typing import List
 import json
+import os
+from glob import glob
+from Tracker import JobTracker
+
+def find_files(format):
+    path = '.\\data\\'
+    files = [file for path, subdir, files in os.walk(path) \
+        for file in glob(os.path.join(path, format+'/*/*/*.txt'))]
+    return files 
 
 def common_event(*args):
     return [arg for arg in args]
@@ -50,8 +60,13 @@ def parse_json(line:str):
         # [fill in the fields as None or empty string]
         return common_event(None,None,None,None,None,None,None,None,None,None,None,None,"B")
 
+# Start DataIngestion
+tracker = JobTracker()
+tracker.update_job_status('DataIngestion', 'starting')
+
 spark = SparkSession.builder.master("local").appName("app").getOrCreate()
-spark.conf.set("fs.azure.account.key.equitymarketdatastorage.blob.core.windows.net","DefaultEndpointsProtocol=https;AccountName=equitymarketdatastorage;AccountKey=0Pjp/4C3REg7xPeNZulrdlcm85uSgj3mtonuvHyZcxNkDtvUyDmDqaum2rDj9qxucgJgHpLfDKCstiQ3UsMo8Q==;EndpointSuffix=core.windows.net")
+spark.conf.set("fs.azure.account.key.equitymarketdatastorage.blob.core.windows.net",\
+    "DefaultEndpointsProtocol=https;AccountName=equitymarketdatastorage;AccountKey=0Pjp/4C3REg7xPeNZulrdlcm85uSgj3mtonuvHyZcxNkDtvUyDmDqaum2rDj9qxucgJgHpLfDKCstiQ3UsMo8Q==;EndpointSuffix=core.windows.net")
 schema = StructType([ \
     StructField("trade_dt", StringType(), True), \
     StructField("rec_type", StringType(),True), \
@@ -68,14 +83,23 @@ schema = StructType([ \
     StructField("partition", StringType(), True) \
   ])
 
-csv_raw = spark.sparkContext.textFile("wasbs://market-value@equitymarketdatastorage.blob.core.windows.net/data/csv/2020-08-05/NYSE/part-00000-5e4ced0a-66e2-442a-b020-347d0df4df8f-c000.txt")
-csv_parsed = csv_raw.map(lambda line: parse_csv(line))
-csv_data = spark.createDataFrame(csv_parsed, schema=schema)
+try:
+    # Access blob storage
+    tracker.update_job_status('DataIngestion', 'running')
 
-json_raw = spark.sparkContext.textFile("wasbs://market-value@equitymarketdatastorage.blob.core.windows.net/data/json/2020-08-05/NASDAQ/part-00000-c6c48831-3d45-4887-ba5f-82060885fc6c-c000.txt")
-json_parsed = json_raw.map(lambda line: parse_json(line))
-json_data = spark.createDataFrame(json_parsed, schema=schema)
+    csv_raw = spark.sparkContext.textFile("wasbs://market-value@equitymarketdatastorage.blob.core.windows.net/data/csv/2020-08-05/NYSE/part-00000-5e4ced0a-66e2-442a-b020-347d0df4df8f-c000.txt")
+    csv_parsed = csv_raw.map(lambda line: parse_csv(line))
+    csv_data = spark.createDataFrame(csv_parsed, schema=schema)
+    csv_data.show()
 
-# Save output
-csv_data.write.partitionBy("partition").mode("overwrite").parquet("output_dir")
-json_data.write.partitionBy("partition").mode("overwrite").parquet("output_dir")
+    json_raw = spark.sparkContext.textFile("wasbs://market-value@equitymarketdatastorage.blob.core.windows.net/data/json/2020-08-05/NASDAQ/part-00000-c6c48831-3d45-4887-ba5f-82060885fc6c-c000.txt")
+    json_parsed = json_raw.map(lambda line: parse_json(line))
+    json_data = spark.createDataFrame(json_parsed, schema=schema)
+    json_data.show()
+
+    # Save output
+    csv_data.write.partitionBy("partition").mode("overwrite").parquet("output_dir")
+    json_data.write.partitionBy("partition").mode("overwrite").parquet("output_dir")
+    tracker.update_job_status('DataIngestion', 'success')
+except Exception as e:
+    tracker.update_job_status('DataIngestion', 'failed', str(e))
